@@ -1,3 +1,5 @@
 .R*
 .idea/
 venv/
+__pycache__/
+.Rproj.user
