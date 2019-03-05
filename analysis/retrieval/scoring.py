@@ -65,6 +65,14 @@ def build_vocab(*vectors):
     return vocab
 
 
+def recall(returned, expected):
+    return len(returned & expected) / len(expected)
+
+
+def precision(returned, expected):
+    return len(returned & expected) / len(returned)
+
+
 def jaccard_similarity(set1, set2):
     try:
         return len(set1 & set2) / len(set1 | set2)

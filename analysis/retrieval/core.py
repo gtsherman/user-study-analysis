@@ -139,24 +139,26 @@ class ExpandableDocument(Document):
 
 class Qrels(object):
     def __init__(self, file=None):
-        self._qrels = collections.defaultdict(set)
+        self._qrels = collections.defaultdict(lambda: collections.defaultdict(int))
+
         if file:
             with open(file) as f:
                 for line in f:
                     query, _, docno, rel = line.strip().split()
-                    if int(rel) > 0:
-                        self._qrels[query].add(docno)
+                    rel = int(rel)
+                    self._qrels[query][docno] = rel
 
     def is_rel(self, docno, query_title):
-        """
-        :param docno:
-        :param query:
-        :return: True if relevant, False otherwise.
-        """
-        return docno in self._qrels[query_title]
+        return self.relevance_of(docno, query_title) > 0
+
+    def relevance_of(self, docno, query_title):
+        return self._qrels[query_title][docno]
 
     def rel_docs(self, query_title):
-        return self._qrels[query_title]
+        return set([docno for docno in self._qrels[query_title] if self._qrels[query_title][docno] > 0])
+
+    def judged_docs(self, query_title):
+        return set(self._qrels[query_title].keys())
 
 
 class BatchResults(object):

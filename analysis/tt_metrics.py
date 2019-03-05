@@ -4,8 +4,8 @@ from functools import lru_cache
 import pyndri
 
 from retrieval.core import IndexWrapper, ExpandableDocument, Stopper
-from retrieval.scoring import DirichletTermScorer, ExpansionDocTermScorer, InterpolatedTermScorer
-from tt_pq_overlap import combine_vectors
+from retrieval.scoring import DirichletTermScorer, ExpansionDocTermScorer
+from tt_pq_metrics import combine_vectors
 
 
 @lru_cache(maxsize=2**9)
@@ -42,7 +42,7 @@ def main():
             appears_in_doc = doc.document_vector()[term] / sum(list(doc.document_vector().values()))
             appears_in_expansion_docs = expansion_pseudo_doc[term] / sum(list(expansion_pseudo_doc.values()))
 
-            print(docno, term, orig_score, expansion_score, appears_in_doc, appears_in_expansion_docs, sep=',')
+            print(user, docno, term, orig_score, expansion_score, appears_in_doc, appears_in_expansion_docs, sep=',')
 
 
 if __name__ == '__main__':
