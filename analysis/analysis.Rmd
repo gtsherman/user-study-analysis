@@ -1,0 +1,724 @@
+---
+title: "User study analysis"
+author: "Garrick Sherman"
+date: "March 22, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+# To what extent does topic term/pseudo-query overlap affect the resulting language model?
+
+The goal is to attempt to measure to what extent the quality of the pseudo-query correlates with improvement to the language model.
+
+There are four quantities that attempt to measure the quality of the pseudo-query:
+- The recall of the topic terms within the pseudo-query
+- The average precision of the topic terms within the pseudo-query
+- The Jaccard similarity of the results for the topic terms (issued as a query) and the pseudo-query
+- The recall of the topic terms results within the pseudo-query results
+- The cosine similarity of the topic terms results pseudo-document and the pseudo-query results pseudo-document
+
+There are three quantities to describe language model change:
+- Topic term likelihood change
+- Query likelihood change (by relevance)
+- Expansion document coherence
+
+## Topic term likelihood
+
+The topic terms are the best information we have about the topic of the document. If the probability of generating the topic terms increases as a result of expansion, the expansion has likely improved the language model.
+
+```{r}
+doc_tt_metrics %>%
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  ggplot(aes(expanded_tt_likelihood - target_tt_likelihood)) +
+    geom_histogram(bins = 20) +
+    geom_vline(xintercept = 0, color = 'red')
+```
+
+It appears that the topic term probabilities generally remain about the same, with perhaps slightly more of them improving than not.
+
+```{r}
+doc_tt_metrics %>%
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  with(t.test(expanded_tt_likelihood, target_tt_likelihood, paired = T))
+```
+
+It's a very, very small improvement, but overall the average topic term does improve in likelihood after expansion.
+
+```{r}
+doc_tt_metrics %>%
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  with(t.test(expansion_tt_likelihood, target_tt_likelihood, paired = T))
+```
+
+Interestingly, the likelihood of the topic terms decreases at the expansion LM stage, even though it ultimately increases at the expanded stage.
+
+```{r}
+doc_tt_metrics %>%
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  ggplot(aes(user, expanded_tt_likelihood - target_tt_likelihood, fill = user)) +
+  geom_boxplot()
+```
+
+```{r}
+doc_tt_metrics %>%
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  with(summary(aov(expanded_tt_likelihood - target_tt_likelihood ~ user)))
+```
+
+Though the choice of topic terms varies by user, the change in the probabilities of those topic terms as a result of expansion is consistent across users.
+
+```{r}
+doc_tt_metrics %>% 
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  mutate(likelihood_diff = expanded_tt_likelihood - target_tt_likelihood) %>%
+  inner_join(tt_pq_metrics) %>%
+  summarize(cor(pseudo_ap, likelihood_diff, method='kendall'),
+            cor(pseudo_term_recall, likelihood_diff, method='kendall'))
+```
+
+There's no particular correlation between the metrics of topic term/pseudo-query term overlap and the change in topic term likelihood. It would have been reasonable to believe that when the pseudo-query accurately captures the main topic of the document (expressed in the topic terms), it would do a better job expanding the language model than when it failed to incorporate the topic terms. This does not appear to be the case, at least by the standard of the change in topic term likelihood.
+
+```{r}
+doc_tt_metrics %>% 
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  mutate(likelihood_diff = expanded_tt_likelihood - target_tt_likelihood) %>%
+  inner_join(tt_pq_metrics) %>%
+  summarize(cor(results_jacc, likelihood_diff, method='kendall'),
+            cor(pseudo_results_recall, likelihood_diff, method='kendall'))
+```
+
+We can treat the topic terms as a query and measure the extent to which the results for that topic term query overlap with the results for the pseudo-query. The amount of result overlap slightly correlates with the change in topic term likelihood. We can infer that a) what matters is not the similarity of the terms but the similarity of their results; and b) even when the terms do not overlap highly, it must be possible for the topic terms and the pseudo-query to retrieve the same set of results.
+
+```{r}
+doc_tt_metrics %>% 
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  mutate(likelihood_diff = expanded_tt_likelihood - target_tt_likelihood) %>%
+  inner_join(tt_pq_metrics) %>%
+  summarize(cor(cosine, likelihood_diff, method='kendall'))
+```
+
+The highest correlation is between the pseudo-documents cosine similarity and the change in topic term probability. This indicates that if the pseudo-query does a good job producing an expansion language model -- even if it does so using a different set of documents than the topic terms query -- it may be an indication that the language model of the expanded document will improve.
+
+## Query likelihood
+
+Each of the documents included in the user study is judged for at least one query. We can measure a document's language model improvement with respect to its query relevance: if the document is relevant, an improved LM is one that increased the query probability; if the document is nonrelevant, an improved LM is one that decreases the query likelihood. At the very least, we would expect that query likelihood would increase _more_ for relevant documents than nonrelevant documents whenever the language model has been improved.
+
+```{r}
+doc_q_metrics %>%
+  inner_join(tt_q_metrics %>% select(docno, rel) %>% distinct()) %>%
+  mutate(rel = sign(rel)) %>%  # convert any level of relevance into 1
+  gather(ql, val, expanded_ql:target_ql) %>%
+  ggplot(aes(factor(rel), val)) +
+    facet_wrap(~ ql) +
+    geom_boxplot()
+```
+
+It appears that relevant documents always have a higher query likelihood, regardless of how we've computed our language model. This is probably to be expected.
+
+```{r}
+doc_q_metrics %>%
+  inner_join(tt_q_metrics %>% select(docno, rel) %>% distinct()) %>%
+  mutate(rel = sign(rel)) %>%
+  mutate(expanded_ql = exp(expanded_ql),
+         target_ql = exp(target_ql),
+         ql_diff = expanded_ql - target_ql) %>%
+  filter(ql_diff > -.002) %>%
+  ggplot(aes(factor(rel), ql_diff)) +
+    geom_boxplot()
+```
+
+The query probability almost always mproves for both relevant and nonrelevant documents, but they seem to improve more for relevant documents than nonrelevant ones.
+
+```{r}
+doc_q_metrics %>%
+  inner_join(tt_q_metrics %>% select(docno, rel) %>% distinct()) %>%
+  mutate(rel = sign(rel)) %>%
+  mutate(expanded_ql = exp(expanded_ql),
+         target_ql = exp(target_ql),
+         ql_diff = expanded_ql - target_ql) %>%
+  filter(ql_diff > -.002) %>%
+  with(t.test(ql_diff ~ factor(rel)))
+```
+
+The difference is very small in absolute terms, but relevant documents do indeed improve in query likelihood more than nonrelevant documents.
+
+```{r}
+doc_q_metrics %>%
+  inner_join(tt_q_metrics %>% select(docno, rel) %>% distinct()) %>%
+  mutate(expanded_ql = exp(expanded_ql),
+         expansion_ql = exp(expansion_ql),
+         target_ql = exp(target_ql),
+         ql_diff = expanded_ql - target_ql,
+         ql_diff_expansion = expansion_ql - target_ql,
+         rel = sign(rel)) %>%
+  inner_join(tt_pq_metrics) %>%
+  group_by(rel) %>%
+  summarize(cor(pseudo_ap, ql_diff, method='kendall'),
+            cor(pseudo_term_recall, ql_diff, method='kendall'),
+            cor(pseudo_ap, ql_diff_expansion, method='kendall'),
+            cor(pseudo_term_recall, ql_diff_expansion, method='kendall'))
+```
+
+As with topic terms, there is not really any correlation between term overlap and query likelihood difference. What little correlation there is is consistently stronger for relevant documents, i.e. expanded relevant documents improve in query likelihood more consistently as a result of topic term/pseudo-query overlap than do nonrelevant documents. But the numbers don't back up this association.
+
+```{r}
+doc_q_metrics %>%
+  inner_join(tt_q_metrics %>% select(docno, rel) %>% distinct()) %>%
+  mutate(expanded_ql = exp(expanded_ql),
+         expansion_ql = exp(expansion_ql),
+         target_ql = exp(target_ql),
+         ql_diff = expanded_ql - target_ql,
+         ql_diff_expansion = expansion_ql - target_ql,
+         rel = sign(rel)) %>%
+  inner_join(tt_pq_metrics) %>%
+  group_by(rel) %>%
+  summarize(cor(results_jacc, ql_diff, method='kendall'),
+            cor(pseudo_results_recall, ql_diff, method='kendall'),
+            cor(results_jacc, ql_diff_expansion, method='kendall'),
+            cor(pseudo_results_recall, ql_diff_expansion, method='kendall'))
+```
+
+There is slight correlation between results overlap and query likelihood improvement, which is mostly undifferentiated by the relevance of the document. 
+
+```{r}
+doc_q_metrics %>%
+  inner_join(tt_q_metrics %>% select(docno, rel) %>% distinct()) %>%
+  mutate(expanded_ql = exp(expanded_ql),
+         expansion_ql = exp(expansion_ql),
+         target_ql = exp(target_ql),
+         ql_diff = expanded_ql - target_ql,
+         ql_diff_expansion = expansion_ql - target_ql,
+         rel = sign(rel)) %>%
+  inner_join(tt_pq_metrics) %>%
+  group_by(rel) %>%
+  summarize(cor(cosine, ql_diff, method='kendall'),
+            cor(cosine, ql_diff_expansion, method='kendall'))
+```
+
+A very slightly better correlation is found between the pseudo-document cosine similarity and the query likelihood change.
+
+```{r}
+doc_q_metrics %>%
+  inner_join(tt_q_metrics %>% select(docno, rel) %>% distinct()) %>%
+  mutate(expanded_ql = exp(expanded_ql),
+         expansion_ql = exp(expansion_ql),
+         target_ql = exp(target_ql),
+         ql_diff = expanded_ql - target_ql,
+         ql_diff_expansion = expansion_ql - target_ql,
+         rel = sign(rel)) %>%
+  inner_join(tt_pq_metrics) %>%
+  group_by(rel) %>%
+  summarize(cor(pseudo_term_recall, expanded_ql, method='kendall'),
+            cor(pseudo_results_recall, expanded_ql, method='kendall'),
+            cor(cosine, expansion_ql, method='kendall'))
+```
+
+Very similar similar correlations are found when we simply compare the expanded document query likelihood against the similarity metrics.
+
+## Expansion document coherence
+
+A slightly different approach to measuring language model quality, expansion document coherence uses the average pairwise cosine similarity among the expansion documents (as retrieved by the pseudo-query) to quantify the extent to which expansion documents are about the same topic. The idea in this case is that a more coherent set of expansion documents is a signal that the expanded document language model will have shifted in a specific, clear direction.
+
+```{r}
+doc_q_metrics %>%
+  inner_join(doc_only_metrics) %>%
+  inner_join(tt_pq_metrics) %>%
+  summarize(cor(pseudo_term_recall, pairwise_cosine, method='kendall'),
+            cor(pseudo_ap, pairwise_cosine, method='kendall'),
+            cor(results_jacc, pairwise_cosine, method='kendall'),
+            cor(pseudo_results_recall, pairwise_cosine, method='kendall'))
+```
+
+As in previous cases, there is no particular correlation between term overlap and expansion document coherence, but a slight correlation does exist between result overlap and expansion document coherence.
+
+```{r}
+doc_q_metrics %>%
+  inner_join(doc_only_metrics) %>%
+  inner_join(tt_pq_metrics) %>%
+  summarize(cor(cosine, pairwise_cosine, method='kendall'),
+            cor(cosine, pairwise_cosine, method='kendall'))
+```
+
+The strongest correlation found so far is between the pseudo-document cosine similarity and the expansion document coherence.
+
+```{r}
+doc_q_metrics %>%
+  inner_join(doc_only_metrics) %>%
+  inner_join(tt_pq_metrics) %>%
+  ggplot(aes(cosine, pairwise_cosine)) + geom_point()
+```
+
+
+## Conclusions
+
+There is evidence to support the idea that topic term/pseudo-query similarity is associated with higher quality expanded document language models. What is clear, however, is that term overlap is insufficient to measure this similarity. Instead, association is much clearer when the topic terms and pseudo-query retrieve similar sets of documents, and clearer still when the language models produced by their results are similar. 
+
+This seems logical. These measures of similarity between topic terms and pseudo-query are intended to quantify the quality of the pseudo-query; since topic terms are our best information about the topical makeup of a document, a better pseudo-query is one that is more similar to the topic terms. However, in terms of document expansion, a better pseudo-query is one that retrieves the most useful expansion documents. If a pseudo-query can retrieve equally good expansion documents with and without employing the topic terms, its term overlap is irrelevant. We can approximate the quality of its retrieval by comparing its retrieved documents with those retrieved by using the topic terms as a query. But there's yet another step to this: expansion documents are only good if they produce a good language model. It follows, then, that different sets of documents may produce equally good language models, and therefore that the specific choice of expansion documents is subordinate to the language model they produce. The cosine similarity between the pseudo-documents produced for the topic terms query and the pseudo-query is an efficient approximation of the language model similarity, and also shows the highest correlation with the three types of document language model improvement.
+
+The above discussion implies that very different results can be retrieved even when the topic term/pseudo-query overlap is high. This can be shown:
+
+```{r}
+tt_pq_metrics %>%
+  mutate(divergence = pseudo_term_recall - pseudo_results_recall) %>%
+  select(user, docno, pseudo_term_recall, pseudo_results_recall, divergence) %>%
+  arrange(-divergence)
+```
+
+In the worst case, despite 8 of 10 topic terms appearing in the pseudo-query, only 1 of the 10 topic terms results also appears in the 10 pseudo-query results.
+
+```{r}
+tt %>%
+  filter(user == 'UOPBK', doc == 'AP880802-0073') %>%
+  full_join(ap_pq) %>%
+  select(term, weight)
+```
+
+Nevertheless, it is possible for the divergent results sets to produce similar language models:
+
+```{r}
+tt_pq_metrics %>%
+  mutate(divergence = pseudo_term_recall - pseudo_results_recall,
+         divergence_cosine = divergence * cosine) %>%
+  select(user, docno, pseudo_term_recall, pseudo_results_recall, divergence, cosine, divergence_cosine) %>%
+  filter(cosine > median(cosine)) %>%  # only keep the top 50% closest expansion/target pseudo-documents
+  arrange(-divergence_cosine)
+```
+
+It is also evidently possible for queries with very different terms to retrieve similar document sets:
+
+```{r}
+tt_pq_metrics %>%
+  mutate(divergence = pseudo_results_recall - pseudo_term_recall) %>%
+  select(user, docno, pseudo_results_recall, pseudo_term_recall, divergence) %>%
+  arrange(-divergence)
+```
+
+```{r}
+ap_pq %>%
+  filter(doc == 'AP890406-0119') %>%
+  select(term, weight)
+```
+
+```{r}
+tt %>%
+  filter(user == 'HSOAQ', doc == 'AP890406-0119') %>%
+  select(term)
+```
+
+Although only 2 of the 7 topic terms appear in the pseudo-query, 8 of the topic terms results also appeared in the pseudo-query results.
+
+And it is similarly possible for very dissimilar results sets to produce very similar language models:
+
+```{r}
+tt_pq_metrics %>%
+  mutate(divergence = cosine - pseudo_results_recall,
+         cosine_percentile = percent_rank(cosine)) %>%
+  select(user, docno, cosine, pseudo_results_recall, divergence, cosine_percentile) %>%
+  arrange(-divergence)
+```
+
+In fact, the most extreme case has a pseudo-document cosine similarity greater than 91.8% of all other cosine values, despite having no results in common.
+
+```{r}
+gov2_pq %>%
+  filter(doc == 'GX269-69-7323852') %>%
+  select(term, weight)
+```
+
+```{r}
+tt %>%
+  filter(user == 'KIMCZ', doc == 'GX269-69-7323852') %>%
+  select(term)
+```
+
+When we observe the results lists for these two queries, we see that they both exclusively retrieve (disjoint sets of) pages about school districts. However, since both queries exclusively retrieve school district pages, it is not surprising that they produce extremely similar language models.
+
+Another example:
+
+```{r}
+ap_pq %>%
+  filter(doc == 'AP890902-0140') %>%
+  select(term, weight)
+```
+
+```{r}
+tt %>%
+  filter(user == 'HSOAQ', doc == 'AP890902-0140') %>%
+  select(term)
+```
+
+Again, the results sets are largely disjoint but also both focus heavily on Jews and frequently on their presence in eastern Europe, leading to reasonably similar topic matter despite dissimilar terms.
+
+These findings are interesting considering the correlations observed among these variables of topic term/pseudo-query overlap:
+
+```{r}
+tt_pq_metrics %>%
+  select(pseudo_term_recall, pseudo_results_recall, cosine) %>%
+  filter(cosine > .75) %>%
+  ggpairs(lower=list(continuous='smooth'))
+```
+
+```{r}
+tt_pq_metrics %>%
+  ggplot(aes(pseudo_term_recall, pseudo_results_recall)) + geom_jitter(alpha = .15) + geom_density_2d(h = c(0.15, 0.5)) + geom_smooth(method = 'lm')
+```
+
+```{r}
+tt_pq_metrics %>%
+  ggplot(aes(pseudo_term_recall, cosine)) + geom_jitter(alpha = .15) + geom_density_2d(h = c(0.15, 0.5)) + geom_smooth(method = 'lm')
+```
+
+```{r}
+tt_pq_metrics %>%
+  ggplot(aes(pseudo_results_recall, cosine)) + geom_jitter(alpha = .15) + geom_density_2d(h = c(0.15, 0.5)) + geom_smooth(method = 'lm')
+```
+
+There is a much stronger relationship between similar results sets and similar language models than there is between term overlap and either results set or language model similarity. 
+
+# To what extent does topic term/query term overlap indicate document relevance?
+
+We take the topic terms to be the best representation available of document topicality. But in the case of relevant documents, we also know that the document is at least partly on the topic of the query, and therefore that query terms provide a similarly useful representation topicality.
+
+Comparing the topic terms to the query terms, faceted by document relevance, is therefore a good way to establish whether topic terms are capturing the same type of topicality as query terms. Even if these terms do not overlap, it is still possible that the topic terms have captured a more general topicality than the query terms represent.
+
+```{r}
+tt_q_metrics %>%
+  group_by(sign(rel)) %>%
+  summarize(cor(tt_q_recall, results_recall))
+```
+
+There is a reasonable amount of correlation between term overlap and results overlap, as we might expect, with a greater correlation for relevant documents than nonrelevant documents.
+
+```{r}
+tt_q_metrics %>%
+  ggplot(aes(tt_q_recall, results_recall)) + 
+    facet_grid(cols = vars(sign(rel))) +
+    geom_jitter(alpha = .15) +
+    geom_smooth(method = 'lm')
+```
+
+## Does greater topic term/query similarity result in more improved language models?
+
+```{r}
+doc_q_metrics %>%
+  gather(m, v, expanded_ql:target_ql) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  inner_join(tt_q_metrics) %>%
+  mutate(ql_diff = expanded_ql - target_ql,
+         ql_diff_expansion = expansion_ql - target_ql) %>%
+  group_by(sign(rel)) %>%
+  summarize(cor(ql_diff, tt_q_recall, method = 'kendall'),
+            cor(ql_diff, results_recall, method = 'kendall'),
+            cor(ql_diff_expansion, tt_q_recall, method = 'kendall'),
+            cor(ql_diff_expansion, results_recall, method = 'kendall'))
+```
+
+```{r}
+doc_q_metrics %>%
+  gather(m, v, expanded_ql:target_ql) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  inner_join(tt_q_metrics) %>%
+  mutate(ql_diff = expanded_ql - target_ql,
+         ql_diff_expansion = expansion_ql - target_ql) %>%
+  ggplot(aes(results_recall, ql_diff)) +
+    facet_grid(cols = vars(sign(rel))) +
+    geom_jitter(alpha = .15) +
+    geom_smooth(method = 'lm')
+```
+
+```{r}
+doc_q_metrics %>%
+  gather(m, v, expanded_ql:target_ql) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  inner_join(tt_q_metrics) %>%
+  group_by(sign(rel)) %>%
+  summarize(cor(expanded_ql, tt_q_recall, method = 'kendall'),
+            cor(expanded_ql, results_recall, method = 'kendall'),
+            cor(expansion_ql, tt_q_recall, method = 'kendall'),
+            cor(expansion_ql, results_recall, method = 'kendall'),
+            cor(target_ql, tt_q_recall, method = 'kendall'),
+            cor(target_ql, results_recall, method = 'kendall'))
+```
+
+```{r}
+doc_q_metrics %>%
+  gather(m, v, expanded_ql:target_ql) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  inner_join(tt_q_metrics) %>%
+  group_by(sign(rel)) %>%
+  summarize(cor(expanded_ql, tt_q_recall, method = 'pearson'),
+            cor(expanded_ql, results_recall, method = 'pearson'),
+            cor(expansion_ql, tt_q_recall, method = 'pearson'),
+            cor(expansion_ql, results_recall, method = 'pearson'),
+            cor(target_ql, tt_q_recall, method = 'pearson'),
+            cor(target_ql, results_recall, method = 'pearson'))
+```
+
+In all likelihood, these high Pearson correlation values are the result of influential observations on the tails of the observations. The Kendall correlation is probably the more informative value.
+
+```{r}
+doc_q_metrics %>%
+  gather(m, v, expanded_ql:target_ql) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  inner_join(tt_q_metrics) %>%
+  ggplot(aes(tt_q_recall, expanded_ql)) +
+    facet_grid(cols = vars(sign(rel))) +
+    geom_jitter(alpha = .15) +
+    geom_density_2d(h = c(.4, .005)) +
+    geom_smooth(method = 'lm')
+```
+
+```{r}
+doc_q_metrics %>%
+  gather(m, v, expanded_ql:target_ql) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  inner_join(tt_q_metrics) %>%
+  ggplot(aes(results_recall, expanded_ql)) +
+    facet_grid(cols = vars(sign(rel))) +
+    geom_jitter(alpha = .15) +
+    geom_smooth(method = 'lm')
+```
+
+The results above are interesting. They show that there's relatively weak correlation between topic term/query similarity and query likelihood improvement (though the correlation is certainly still there). In contrast, there is relatively strong correlation between topic term/query similarity and the query likelihood (especially under the expansion and expanded language models). The correlation is approximately equal for relevant and nonrelevant documents; it is generally slightly higher in absolute terms for nonrelevant documents. In contrast to the topic term/pseudo-query comparison, the highest correlations are found for the term overlap metrics rather than the results overlap metrics, which makes sense since the query terms are the quantity most directly measured by the query likelihood.
+
+It makes sense that the relevance does not make a difference here. If the query and the topic terms are similar, it indicates that the document is evidently about the query. Therefore, when the topic terms and the query terms overlap, we would expect a high query likelihood regardless of relevance. The question, then, is why the nonrelevant documents have a high query likelihood, i.e. why are they making heavy use of query terms despite not being relevant to the query?
+
+## Why is topic term/query term overlap high for nonrelevant documents?
+
+```{r}
+doc_q_metrics %>% 
+  gather(m, v, expanded_ql:target_ql) %>% 
+  mutate(v = exp(v)) %>% 
+  spread(m, v) %>% 
+  inner_join(tt_q_metrics) %>% 
+  filter(rel == 0) %>% 
+  arrange(-tt_q_jacc)
+```
+
+It appears that cases in which topic term/query overlap are high despite non-relevance are often the result of converting the more complex "description" queries in earlier TREC collections into shorter keyword queries. For example, the highest topic term/query term overlap for a nonrelevant document in our data is user VXDPZ's annotations of document FT942-768 for query 395. 
+
+```{r}
+topics %>%
+  filter(query == '395')
+```
+```{r}
+tt %>%
+  filter(doc == 'FT942-768', user == 'VXDPZ') %>%
+  select(user, doc, term)
+```
+
+The title form of query 395 is simply "tourism" and FT942-768 _is_ about tourism, which is why all three users who annotated this document selected "tourism" as a topic term. However, while the document discusses the tourism behavior of Britons, it does _not_ fit the description length query: "provide examples of successful attempts to attract tourism as a means to improve a local economy."
+
+The second highest result, user VXDPZ's annotation of AP890404-0141 for query 192, shows a similar pattern. 
+
+```{r}
+topics %>%
+  filter(query == '192')
+```
+
+```{r}
+tt %>%
+  filter(doc == 'AP890404-0141', user == 'VXDPZ') %>%
+  select(user, doc, term)
+```
+
+The title form of query 192 is "oil spill cleanup." This document is about cleanup of otters that were hurt as a result of the Exxon Valdez oil spill, and is therefore quite likely relevant to the title form of the query; and, indeed, the topic terms for this document include the words "oil", "spill", and "cleanup." However, the narrative form of the query states, "To be relevant a document will identify a method, procedure, or chemical process used in cleaning up the water and beaches after a major oil spill." The document was judged not relevant to the query, presumably due to the lack of discussion of either cleanup methods or the cleaning of water and beaches.
+
+Such cases seem difficult to solve without employing the narrative or description length query forms, which is beyond the scope of this work. 
+
+If the topic terms and the query do _not_ overlap, but the target query likelihood is high, we would expect our expansion technique to decrease the query likelihood estimate for nonrelevant documents. Unfortunately, in reality, the nature of the pseudo-query might cause overestimation of the query terms.
+
+```{r}
+doc_q_metrics %>%
+  gather(m, v, expanded_ql:target_ql) %>%
+  mutate(v = exp(v)) %>%
+  spread(m, v) %>%
+  inner_join(tt_q_metrics) %>%
+  filter(rel == 0) %>%
+  group_by(query) %>%
+  mutate(target_ql_rank = percent_rank(target_ql),
+         ql_change = expanded_ql - target_ql,
+         expansion_ql_diff = expansion_ql - target_ql) %>%
+  ungroup() %>%
+  select(user, docno, query, ql_change, expansion_ql_diff, target_ql, target_ql_rank, tt_q_recall, target_ql) %>%
+  arrange(-target_ql_rank, tt_q_recall, user)
+```
+
+```{r}
+topics %>%
+  filter(query == '103')
+```
+
+```{r}
+tt %>%
+  filter(user == 'HOMFA', doc == 'AP880226-0220') %>%
+  select(-index)
+```
+
+```{r}
+pq %>%
+  filter(doc == 'AP880226-0220') %>%
+  arrange(-weight)
+```
+
+In the above case, the term "welfare" is quite prominent in the pseudo-query, but is absent from the topic terms (although it was provided as an option to the annotator). We cannot speculate as to why "welfare" was not selected as a topic term despite its apparent prominence.
+
+```{r}
+topics %>%
+  filter(query == 493)
+```
+
+
+```{r}
+tt %>%
+  filter(user == 'DDSCR', doc == 'WTX098-B02-3') %>%
+  select(-index)
+```
+
+```{r}
+pq %>%
+  filter(doc == 'WTX098-B02-3') %>%
+  arrange(-weight)
+```
+
+```{r}
+doc_q_metrics %>% 
+  gather(m, v, expanded_ql:target_ql) %>%
+  mutate(v = exp(v)) %>% 
+  spread(m, v) %>% 
+  inner_join(tt_q_metrics) %>% 
+  inner_join(tt_pq_metrics) %>% 
+  select(user, docno, query, rel, expanded_ql, expansion_ql, 
+         target_ql, tt_q_recall, pseudo_term_recall) %>% 
+  mutate(ql_change = expanded_ql - target_ql, 
+         ql_inc = sign(ql_change)) %>% 
+  ggplot(aes(tt_q_recall, ql_change, color = factor(ql_inc))) + 
+    facet_grid(cols = vars(factor(sign(rel)))) +
+    geom_jitter(alpha = .15) + 
+    geom_smooth(method = 'lm')
+```
+
+```{r}
+doc_q_metrics %>% 
+  gather(m, v, expanded_ql:target_ql) %>%
+  mutate(v = exp(v)) %>% 
+  spread(m, v) %>% 
+  inner_join(tt_q_metrics) %>% 
+  inner_join(tt_pq_metrics) %>% 
+  select(user, docno, query, rel, expanded_ql, expansion_ql, 
+         target_ql, tt_q_recall, pseudo_term_recall) %>% 
+  mutate(ql_change = expanded_ql - target_ql, 
+         ql_inc = sign(ql_change)) %>% 
+  group_by(sign(rel), ql_inc) %>%
+  summarize(cor(tt_q_recall, ql_change, method = 'kendall'))
+```
+
+Strangely, we see that increased topic term/query term overlap correlates with query likelihood change in both directions. Documents whose query likelihood increased as a result of expansion increased _more_ when the query terms were more present in their topic terms, which makes sense, since it suggests that the documents were in fact about the query. If the target query likelihood is low, but the topic terms and the query overlap, we would expect our expansion technique to increase the query likelihood estimate -- and this is borne out by the correlations above.
+
+More surprising is the fact that more topic term/query term overlap also resulted in more query likelihood _decrease_ among those documents that decreased. In other words, the stronger the indication that the document was about the query terms, the more the query likelihood decreased as a result of expansion. This is perplexing and requires further thought.
+
+# Does document score/rank improve as a result of language model changes?
+
+```{r}
+doc_tt_metrics %>% 
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>% 
+  mutate(v = exp(v)) %>% 
+  spread(m, v) %>% 
+  mutate(ttl_change = expanded_tt_likelihood - target_tt_likelihood) %>% 
+  inner_join(tt_pq_metrics) %>% 
+  inner_join(tt_q_metrics) %>% 
+  inner_join(tt_metrics %>% 
+               mutate(in_doc = sign(percent_of_doc),
+                      in_exp = sign(percent_of_exp),
+                      added = in_exp - in_doc) %>%
+               group_by(user, docno) %>% 
+               summarize(num_added = sum(added))) %>%
+  with(summary(lm(ttl_change ~ pseudo_term_recall + pseudo_results_recall + cosine + tt_q_recall + num_added)))
+```
+
+That is a very solid R-squared value. It indicates that our measured language model changes do a good job predicting the change in topic term likelihood between the original and expanded language models.
+
+Notice, however, that although all of the predictors are statistically significant, the majority of this predictive power comes from the `percent_inc` variable:
+
+```{r}
+doc_tt_metrics %>% 
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>% 
+  mutate(v = exp(v)) %>% 
+  spread(m, v) %>% 
+  mutate(ttl_change = expanded_tt_likelihood - target_tt_likelihood) %>% 
+  inner_join(tt_pq_metrics) %>% 
+  inner_join(tt_q_metrics) %>% 
+  inner_join(tt_metrics %>% 
+               mutate(in_doc = sign(percent_of_doc),
+                      in_exp = sign(percent_of_exp),
+                      added = in_exp - in_doc) %>%
+               group_by(user, docno) %>% 
+               summarize(num_added = sum(added))) %>%
+  with(summary(lm(ttl_change ~ num_added)))
+```
+
+This indicates that knowing how many of the topic terms are in the expansion language model compared to the target language model is highly predictive of the change in topic term likelihood. This of course makes sense: having more topic terms added to the language model is a very good indication that the overall topic term likelihood will increase, and the converse is also true.
+
+```{r}
+doc_tt_metrics %>% 
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>% 
+  mutate(v = exp(v)) %>% 
+  spread(m, v) %>% 
+  mutate(ttl_change = expanded_tt_likelihood - target_tt_likelihood) %>% 
+  inner_join(tt_metrics %>% 
+               mutate(in_doc = sign(percent_of_doc),
+                      in_exp = sign(percent_of_exp),
+                      added = in_exp - in_doc) %>%
+               group_by(user, docno) %>% 
+               summarize(num_added = sum(added))) %>%
+  ggplot(aes(num_added, ttl_change)) + geom_jitter(alpha = .15) + geom_density_2d() + geom_smooth(method = 'lm')
+```
+
+```{r}
+doc_tt_metrics %>% 
+  gather(m, v, expanded_tt_likelihood:target_tt_likelihood) %>% 
+  mutate(v = exp(v)) %>% 
+  spread(m, v) %>% 
+  mutate(ttl_change = expanded_tt_likelihood - target_tt_likelihood) %>% 
+  inner_join(tt_pq_metrics) %>% 
+  inner_join(tt_q_metrics) %>% 
+  inner_join(tt_metrics %>% 
+               group_by(user, docno) %>% 
+               summarize(num_in_doc = sum(sign(percent_of_doc)), 
+                         num_in_exp = sum(sign(percent_of_exp))) %>% 
+               mutate(percent_inc = num_in_exp / num_in_doc)) %>%
+  inner_join(doc_q_metrics) %>%
+  mutate(expanded_ql = exp(expanded_ql),
+         target_ql = exp(target_ql),
+         ql_change = expanded_ql - target_ql) %>%
+  with(summary(lm(ql_change ~ pseudo_term_recall + pseudo_results_recall + cosine + tt_q_recall + percent_inc)))
+```
+
