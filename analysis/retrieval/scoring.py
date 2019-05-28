@@ -1,4 +1,5 @@
 import math
+from functools import lru_cache
 
 
 class DirichletTermScorer(object):
@@ -7,6 +8,7 @@ class DirichletTermScorer(object):
         self.mu = mu
         self.epsilon = epsilon
 
+    @lru_cache(maxsize=2**5)
     def score(self, term, document):
         term = term.lower()
 
@@ -18,30 +20,47 @@ class DirichletTermScorer(object):
 
 
 class InterpolatedTermScorer(object):
-    def __init__(self, scorers):
+    def __init__(self, scorers, weights):
         """
-        :param scorers: A {scorer: weight} dict.
+        :param scorers: A list of scorer objects.
+        :param weights: A corresponding list of weights.
         """
+        if len(scorers) != len(weights):
+            raise ValueError('Mismatch between scorers (length: {}) and weights (length: {}).'.format(str(len(
+                scorers)), str(len(weights))))
+
         self.scorers = scorers
+        self.weights = weights
 
     def score(self, term, document):
-        return sum([self.scorers[scorer] * scorer.score(term, document) for scorer in self.scorers])
+        return sum([self.weights[i] * self.scorers[i].score(term, document) for i in range(len(self.scorers))])
 
 
 class ExpansionDocTermScorer(object):
-    def __init__(self, scorer):
+    def __init__(self, scorer, stopper=None, num_docs=10, num_terms=20):
         """
         :param scorer: Should be a scorer that is associated with the expansion index.
         """
         self._scorer = scorer
+        self._stopper = stopper
+        self._num_docs = num_docs
+        self._num_terms = num_terms
 
-    def score(self, term, expansion_docs):
+    def score(self, term, document):
         """
         :param term: The term string.
-        :param expansion_docs: A list of (Document, float) tuples, where float is the probability score of the
+        :param document: An ExpandableDocument object
         associated document.
         :return: The term score.
         """
+        # First, normalize the document scores, in case it hasn't already been done
+        expansion_docs = document.expansion_docs(document.pseudo_query(stopper=self._stopper,
+                                                                       num_terms=self._num_terms),
+                                                 num_docs=self._num_docs)
+        k = expansion_docs[0][1]
+        total = sum([math.exp(score-k) for _, score in expansion_docs])
+        expansion_docs = [(doc, math.exp(score-k) / total) for doc, score in expansion_docs]
+
         return sum([exp_score * self._scorer.score(term, exp_doc) for exp_doc, exp_score in expansion_docs])
 
 

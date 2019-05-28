@@ -1,6 +1,7 @@
 import argparse
 import collections
-import statistics
+import math
+import random
 import sys
 
 import pyndri
@@ -37,6 +38,7 @@ def main():
     for docno in pseudo_query_terms:
         pseudo_queries[docno] = Query(docno, vector=pseudo_query_terms[docno])
 
+    # topic_terms[user][doc][term][weight]
     topic_terms = collections.defaultdict(lambda: collections.defaultdict(dict))
     # with open(args.topic_terms) as f:
     for line in sys.stdin:
@@ -51,6 +53,8 @@ def main():
             tts = topic_terms[user][docno]
 
             pseudo_query = pseudo_queries[docno]
+            # as a test, let's do all the same comparisons against a random pseudo-query
+            # pseudo_query = pseudo_queries[random.choice(list(pseudo_queries.keys()))]
 
             tt_vector = collections.Counter(tts)
             tt_query = Query(docno, vector=tt_vector)
@@ -85,10 +89,11 @@ def main():
             pseudo_results_recall = recall(pseudo_result_docnos, tt_result_docnos)
             cosine = cosine_similarity(tt_pseudo_doc, pseudo_pseudo_doc)
             pseudo_ap = average_precision(docno, sorted(pseudo_query.vector.keys(), key=lambda k:
-            pseudo_query.vector[k], reverse=True), tt_qrels)
+                                                        pseudo_query.vector[k], reverse=True), tt_qrels)
             pseudo_term_recall = recall(set(pseudo_query.vector.keys()), set(tts))
 
             print(user, docno, results_jaccard, pseudo_results_recall, cosine, pseudo_ap, pseudo_term_recall, sep=',')
+            # print(docno, results_jaccard, pseudo_results_recall, cosine, pseudo_ap, pseudo_term_recall, sep=',')
 
 
 if __name__ == '__main__':

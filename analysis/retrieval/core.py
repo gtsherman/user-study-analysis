@@ -44,6 +44,12 @@ class Query(object):
     def __str__(self):
         return '#weight( ' + ' '.join([str(weight) + ' ' + term for term, weight in self.vector.items()]) + ' )'
 
+    def __hash__(self):
+        return hash(str(self))
+
+    def __eq__(self, other):
+        return str(self) == str(other)
+
 
 class Stopper(object):
     def __init__(self, terms=None, file=None):
@@ -160,6 +166,13 @@ class Qrels(object):
     def judged_docs(self, query_title):
         return set(self._qrels[query_title].keys())
 
+    def judged_for_queries(self, docno):
+        queries = {}
+        for query in self._qrels:
+            if docno in self._qrels[query]:
+                queries[query] = self.relevance_of(docno, query)
+        return queries
+
 
 class BatchResults(object):
     def __init__(self, file=None):
@@ -215,6 +228,9 @@ class IndexWrapper(object):
 
     def total_terms(self):
         return self.index.total_terms()
+
+    def total_docs(self):
+        return self.index.document_count()
 
     def term_document_frequency(self, term):
         try:

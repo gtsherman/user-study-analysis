@@ -1,6 +1,5 @@
 import argparse
 import collections
-from pprint import pprint
 
 import pyndri
 

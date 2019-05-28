@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+library(GGally)
 ```
 
 # To what extent does topic term/pseudo-query overlap affect the resulting language model?
@@ -144,12 +145,12 @@ doc_q_metrics %>%
   mutate(expanded_ql = exp(expanded_ql),
          target_ql = exp(target_ql),
          ql_diff = expanded_ql - target_ql) %>%
-  filter(ql_diff > -.002) %>%
+  filter(ql_diff > -.001) %>%
   ggplot(aes(factor(rel), ql_diff)) +
     geom_boxplot()
 ```
 
-The query probability almost always mproves for both relevant and nonrelevant documents, but they seem to improve more for relevant documents than nonrelevant ones.
+The query probability almost always improves for both relevant and nonrelevant documents, but they seem to improve more for relevant documents than nonrelevant ones.
 
 ```{r}
 doc_q_metrics %>%
@@ -158,7 +159,6 @@ doc_q_metrics %>%
   mutate(expanded_ql = exp(expanded_ql),
          target_ql = exp(target_ql),
          ql_diff = expanded_ql - target_ql) %>%
-  filter(ql_diff > -.002) %>%
   with(t.test(ql_diff ~ factor(rel)))
 ```
 
@@ -290,8 +290,8 @@ In the worst case, despite 8 of 10 topic terms appearing in the pseudo-query, on
 
 ```{r}
 tt %>%
+  inner_join(ap_pq) %>%
   filter(user == 'UOPBK', doc == 'AP880802-0073') %>%
-  full_join(ap_pq) %>%
   select(term, weight)
 ```
 
@@ -719,6 +719,7 @@ doc_tt_metrics %>%
   mutate(expanded_ql = exp(expanded_ql),
          target_ql = exp(target_ql),
          ql_change = expanded_ql - target_ql) %>%
+  filter(rel > 0) %>%
   with(summary(lm(ql_change ~ pseudo_term_recall + pseudo_results_recall + cosine + tt_q_recall + percent_inc)))
 ```
 
