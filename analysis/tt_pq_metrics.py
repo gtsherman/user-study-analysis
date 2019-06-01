@@ -24,9 +24,12 @@ def main():
     options.add_argument('pseudo_queries')
     options.add_argument('index')
     options.add_argument('-n', '--num-results', type=int, default=10)
+    options.add_argument('--skip-retrieval', action='store_true')
     args = options.parse_args()
 
-    index = IndexWrapper(pyndri.Index(args.index))
+    if not args.skip_retrieval:
+        index = IndexWrapper(pyndri.Index(args.index))
+        scorer = DirichletTermScorer(index)
 
     pseudo_query_terms = collections.defaultdict(collections.Counter)
     with open(args.pseudo_queries) as f:
@@ -47,7 +50,6 @@ def main():
         terms = parts[3:]
         topic_terms[user][docno] = terms
 
-    scorer = DirichletTermScorer(index)
     for user in topic_terms:
         for docno in topic_terms[user]:
             tts = topic_terms[user][docno]
@@ -56,44 +58,48 @@ def main():
             # as a test, let's do all the same comparisons against a random pseudo-query
             # pseudo_query = pseudo_queries[random.choice(list(pseudo_queries.keys()))]
 
-            tt_vector = collections.Counter(tts)
-            tt_query = Query(docno, vector=tt_vector)
-
-            tt_results = index.query(tt_query, count=args.num_results)
-            pseudo_results = index.query(pseudo_query, count=args.num_results)
-
-            tt_result_docs = set([doc for doc, _ in tt_results])
-            tt_result_docnos = set([doc.docno for doc in tt_result_docs])
-            pseudo_result_docs = set([doc for doc, _ in pseudo_results])
-            pseudo_result_docnos = set([doc.docno for doc in pseudo_result_docs])
-
-            # tt_pseudo_doc = combine_vectors(*[r.document_vector() for r in tt_result_docs])
-            # pseudo_pseudo_doc = combine_vectors(*[r.document_vector() for r in pseudo_result_docs])
-
-            def normalize_results_scores(results):
-                total = sum([score for _, score in results])
-                return [(doc, score / total) for doc, score in results]
-
-            tt_vocab = build_vocab(*[r.document_vector() for r in tt_result_docs])
-            pseudo_vocab = build_vocab(*[r.document_vector() for r in pseudo_result_docs])
-
-            tt_pseudo_doc = {term: sum([exp_score * scorer.score(term, exp_doc) for exp_doc, exp_score in
-                                        normalize_results_scores(tt_results)]) for term in tt_vocab}
-            pseudo_pseudo_doc = {term: sum([exp_score * scorer.score(term, exp_doc) for exp_doc, exp_score in
-                                            normalize_results_scores(pseudo_results)]) for term in pseudo_vocab}
-
             tt_qrels = Qrels()
             tt_qrels._qrels[docno] = collections.Counter(tts)
 
-            results_jaccard = jaccard_similarity(tt_result_docnos, pseudo_result_docnos)
-            pseudo_results_recall = recall(pseudo_result_docnos, tt_result_docnos)
-            cosine = cosine_similarity(tt_pseudo_doc, pseudo_pseudo_doc)
             pseudo_ap = average_precision(docno, sorted(pseudo_query.vector.keys(), key=lambda k:
                                                         pseudo_query.vector[k], reverse=True), tt_qrels)
             pseudo_term_recall = recall(set(pseudo_query.vector.keys()), set(tts))
 
-            print(user, docno, results_jaccard, pseudo_results_recall, cosine, pseudo_ap, pseudo_term_recall, sep=',')
-            # print(docno, results_jaccard, pseudo_results_recall, cosine, pseudo_ap, pseudo_term_recall, sep=',')
+            if not args.skip_retrieval:
+                tt_vector = collections.Counter(tts)
+                tt_query = Query(docno, vector=tt_vector)
+
+                tt_results = index.query(tt_query, count=args.num_results)
+                pseudo_results = index.query(pseudo_query, count=args.num_results)
+
+                tt_result_docs = set([doc for doc, _ in tt_results])
+                tt_result_docnos = set([doc.docno for doc in tt_result_docs])
+                pseudo_result_docs = set([doc for doc, _ in pseudo_results])
+                pseudo_result_docnos = set([doc.docno for doc in pseudo_result_docs])
+
+                # tt_pseudo_doc = combine_vectors(*[r.document_vector() for r in tt_result_docs])
+                # pseudo_pseudo_doc = combine_vectors(*[r.document_vector() for r in pseudo_result_docs])
+
+                def normalize_results_scores(results):
+                    total = sum([score for _, score in results])
+                    return [(doc, score / total) for doc, score in results]
+
+                tt_vocab = build_vocab(*[r.document_vector() for r in tt_result_docs])
+                pseudo_vocab = build_vocab(*[r.document_vector() for r in pseudo_result_docs])
+
+                tt_pseudo_doc = {term: sum([exp_score * scorer.score(term, exp_doc) for exp_doc, exp_score in
+                                            normalize_results_scores(tt_results)]) for term in tt_vocab}
+                pseudo_pseudo_doc = {term: sum([exp_score * scorer.score(term, exp_doc) for exp_doc, exp_score in
+                                                normalize_results_scores(pseudo_results)]) for term in pseudo_vocab}
+
+                results_jaccard = jaccard_similarity(tt_result_docnos, pseudo_result_docnos)
+                pseudo_results_recall = recall(pseudo_result_docnos, tt_result_docnos)
+                cosine = cosine_similarity(tt_pseudo_doc, pseudo_pseudo_doc)
+
+                print(user, docno, results_jaccard, pseudo_results_recall, cosine, pseudo_ap, pseudo_term_recall, sep=',')
+                # print(docno, results_jaccard, pseudo_results_recall, cosine, pseudo_ap, pseudo_term_recall, sep=',')
+            else:
+                print(user, docno, pseudo_ap, pseudo_term_recall, sep=',')
 
 
 if __name__ == '__main__':

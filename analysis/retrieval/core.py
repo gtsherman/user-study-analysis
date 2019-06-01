@@ -25,6 +25,17 @@ def read_queries(file_name, format='json'):
             title = qd.find('number').text
             text = qd.find('text').text
             queries.append(Query(title, query_string=text))
+    elif format == 'csv':
+        query_data = collections.defaultdict(list)
+        with open(file_name) as f:
+            for line in f:
+                query, term = line.strip().split(',')
+                query_data[query].append(term)
+
+        for query_title in query_data:
+            title = query_title
+            vector = collections.Counter(query_data[title])
+            queries.append(Query(title, vector=vector))
     else:
         raise ValueError('Format must be either "json" or "title"')
 
