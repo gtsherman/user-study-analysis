@@ -167,3 +167,44 @@ tt_pq_metrics %>%
 tt_pq_metrics %>%
   inner_join(doc_only_metrics) %>%
   with(summary(lm(pairwise_cosine ~ pseudo_term_recall + results_jacc + cosine)))
+
+
+# TT/PQ vs. TT/Q
+tt_pq_metrics %>% 
+  rename(doc = docno) %>% 
+  inner_join(pq_q_metrics_stemmed) %>% 
+  inner_join(qrels %>% 
+               rename(doc = docno) 
+             %>% mutate(rel = ifelse(rel > 0, 1, 0))) %>% 
+  filter(rel > 0) %>% 
+  with(cor.test(cosine, q_weight_perc, method = 'k'))
+
+# TT/PQ vs PQ/Q
+tt_pq_metrics %>% 
+  inner_join(pq_q_metrics_stemmed %>% 
+               rename(docno = doc)) %>% 
+  inner_join(pq_q_metrics %>% 
+               rename(docno = doc) %>% 
+               select(-pq_q_recall, -pq_q_ap, -q_weight_perc)) %>% 
+  inner_join(qrels %>%
+               mutate(rel = ifelse(rel > 0, 1, 0))) %>% 
+  select(-pseudo_results_recall, -pseudo_term_recall, -pseudo_ap, -q_results_ap, -q_results_prec) %>% 
+  gather(tt_pq, tt_pq_val, results_jacc, cosine) %>% 
+  gather(pq_q, pq_q_val, pq_q_recall, pq_q_ap, q_weight_perc, pq_q_results_jacc, pq_q_results_cosine, pq_results_ap, pq_results_prec) %>% 
+  group_by(tt_pq, pq_q, rel) %>% 
+  summarize(tau = cor.test(tt_pq_val, pq_q_val, method = 'k')$estimate,
+            p = cor.test(tt_pq_val, pq_q_val, method = 'k')$p.value)
+
+# PQ/Q vs QL
+pq_q_metrics %>% 
+  select(-pq_q_recall, -pq_q_ap, -q_weight_perc) %>% 
+  inner_join(pq_q_metrics_stemmed) %>% 
+  inner_join(doc_q_metrics %>% 
+               rename(doc = docno)) %>%
+  mutate(rel = ifelse(rel > 0, 1, 0)) %>%
+  gather(pq_q, pq_q_val, pq_q_recall, pq_q_ap, 
+         q_weight_perc, pq_q_results_jacc, pq_q_results_cosine, 
+         pq_results_ap, pq_results_prec) %>% 
+  group_by(pq_q, rel) %>% 
+  summarize(tau = cor.test(ql_change, pq_q_val, method = 'k')$estimate, 
+            p = cor.test(ql_change, pq_q_val, method = 'k')$p.value)

@@ -122,12 +122,28 @@ query_term_choice_stemmed %>%
             mean(num_q_in_choices),
             median(num_q_in_choices))
 
+# Same as above, but without the "no query terms selected" criterion.
+query_term_choice_stemmed %>% 
+  inner_join(qrels %>% 
+               rename(doc = docno)) %>% 
+  filter(rel > 0, 
+         perc_q_in_choices > 0) %>% 
+  inner_join(tt_q_metrics_stemmed) %>% 
+  select(-user) %>% 
+  distinct() %>% 
+  summarize(mean(q_length),
+            min(q_length),
+            mean(perc_q_in_choices),
+            mean(num_q_in_choices),
+            median(num_q_in_choices))
+
 # Among relevant documents, take the query terms that _are_ offered as topic term choices, but aren't selected by annotators.
 # How often do these terms appear in the document that they might describe?
 query_term_choice_stemmed %>%
   inner_join(qrels %>%
                rename(doc = docno)) %>%
-  filter(rel > 0, perc_q_in_choices > 0) %>%
+  filter(rel > 0) %>%
+  inner_join(tt_q_metrics_stemmed) %>%
   inner_join(topics_stopped_stemmed) %>%
   inner_join(term_choices_stemmed) %>%
   distinct() %>% # because stemmed term choices sometimes include multiples of stems, e.g. campaign and campaigns both -> campaign
@@ -144,23 +160,40 @@ query_term_choice_stemmed %>%
     theme_bw() +
     theme(text = element_text(size = 20)) +
     labs(x = 'Term count in document',
-         y = 'Freq.')
-  
-# How often were the terms that were offered -- but not selected -- present in the doc text?
-query_term_choice_stemmed %>% 
-  inner_join(qrels %>% 
+         y = 'Freq.') +
+    xlim(-1, 28)
+
+# Compare the above by annotator
+query_term_choice_stemmed %>%
+  inner_join(qrels %>%
                rename(doc = docno)) %>%
-  filter(rel > 0) %>% 
-  inner_join(tt_q_metrics_stemmed) %>% 
-  filter(tt_q_recall == 0) %>%
-  inner_join(topics_stopped_stemmed) %>% 
+  filter(rel > 0) %>%
+  inner_join(tt_q_metrics_stemmed) %>%
+  inner_join(topics_stopped_stemmed) %>%
   inner_join(term_choices_stemmed) %>%
+  distinct() %>% # because stemmed term choices sometimes include multiples of stems, e.g. campaign and campaigns both -> campaign
+  inner_join(tt_stemmed) %>%
   distinct() %>%
-  left_join(doc_vecs_stopped_stemmed) %>%
-  mutate(freq = replace_na(freq, 0)) %>%
-  ggplot(aes(freq)) +
-  geom_histogram(binwidth = 1) +
+  #select(doc, query, term) %>%
+  left_join(doc_vecs_stopped_stemmed %>% 
+              group_by(doc) %>%
+              mutate(prob = freq / sum(freq))) %>%
+  mutate(freq = replace_na(freq, 0),
+         prob = replace_na(prob, 0),
+         user = factor(user, levels = c('A', 'B', 'C',
+                                        'D', 'E', 'F', 'G'))) %>% 
+  ggplot(aes(user, freq)) + 
+  geom_violin() +
   theme_bw() +
   theme(text = element_text(size = 20)) +
-  labs(x = 'Term count in document',
-       y = 'Freq.')
+  labs(x = 'Annotator',
+       y = 'Freq. of selected query terms in doc. text')
+
+# Can we predict relevance from TT/Q overlap?
+tt_q_metrics %>% 
+  select(-tt_q_recall, -tt_q_jacc) %>% # clear these since the stemmed versions are more informative
+  inner_join(tt_q_metrics_stemmed) %>% 
+  with(train(factor(rel > 0) ~ tt_q_recall + tt_q_results_recall, 
+             data = ., 
+             method = 'glm', family = binomial, 
+             trControl = trainControl('cv', 10)))
