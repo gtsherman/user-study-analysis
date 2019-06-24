@@ -69,9 +69,41 @@ doc_q_metrics %>%
   labs(x = 'Relevance', y = 'Query log likelihood difference') +
   theme(text = element_text(size=20))
 
+# Compared to TT change
+doc_q_metrics %>%
+  inner_join(doc_tt_metrics) %>%
+  filter(rel > 0) %>%
+  with(cor.test(ql_change, tt_change, method = 'k'))
+doc_q_metrics %>%
+  inner_join(doc_tt_metrics) %>%
+  filter(rel == 0) %>%
+  with(cor.test(ql_change, tt_change, method = 'k'))
+
 
 # Expansion coherence 
-# ...
+# Histogram
+doc_only_metrics %>% 
+  ggplot(aes(pairwise_cosine)) + 
+  geom_histogram(bins = 20) + 
+  theme_bw() +
+  theme(text = element_text(size = 20)) +
+  labs(x = 'Avg. Pairwise Cosine',
+       y = 'Freq.')
+
+# Compared to TT change
+doc_only_metrics %>%
+  inner_join(doc_tt_metrics) %>%
+  with(cor.test(tt_change, pairwise_cosine, method = 'k'))
+
+# Compared to QL change
+doc_only_metrics %>%
+  inner_join(doc_q_metrics) %>%
+  filter(rel > 0) %>%
+  with(cor.test(ql_change, pairwise_cosine, method = 'k'))
+doc_only_metrics %>%
+  inner_join(doc_q_metrics) %>%
+  filter(rel == 0) %>%
+  with(cor.test(ql_change, pairwise_cosine, method = 'k'))
 
 
 # Topic term/pseudo-query overlap
@@ -161,10 +193,14 @@ doc_q_metrics %>%
 
 # Linear models
 tt_pq_metrics %>%
+  select(-pseudo_ap, -pseudo_term_recall) %>%
+  inner_join(tt_pq_metrics_stemmed) %>%
   inner_join(doc_tt_metrics) %>% 
   with(summary(lm(tt_change ~ pseudo_term_recall + results_jacc + cosine)))
 
 tt_pq_metrics %>%
+  select(-pseudo_ap, -pseudo_term_recall) %>%
+  inner_join(tt_pq_metrics_stemmed) %>%
   inner_join(doc_only_metrics) %>%
   with(summary(lm(pairwise_cosine ~ pseudo_term_recall + results_jacc + cosine)))
 

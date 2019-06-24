@@ -172,6 +172,31 @@ query_term_choice_stemmed %>%
   inner_join(topics_stopped_stemmed) %>%
   inner_join(term_choices_stemmed) %>%
   distinct() %>% # because stemmed term choices sometimes include multiples of stems, e.g. campaign and campaigns both -> campaign
+  anti_join(tt_stemmed) %>%
+  distinct() %>%
+  #select(doc, query, term) %>%
+  left_join(doc_vecs_stopped_stemmed %>% 
+              group_by(doc) %>%
+              mutate(prob = freq / sum(freq))) %>%
+  mutate(freq = replace_na(freq, 0),
+         prob = replace_na(prob, 0),
+         user = factor(user, labels = c('A', 'B', 'C',
+                                        'D', 'E', 'F', 'G'))) %>% 
+  ggplot(aes(user, freq)) + 
+  geom_violin() +
+  theme_bw() +
+  theme(text = element_text(size = 20)) +
+  labs(x = 'Annotator',
+       y = 'Freq. of selected query terms in doc. text')
+# Also compare with documents that *are* selected
+query_term_choice_stemmed %>%
+  inner_join(qrels %>%
+               rename(doc = docno)) %>%
+  filter(rel > 0) %>%
+  inner_join(tt_q_metrics_stemmed) %>%
+  inner_join(topics_stopped_stemmed) %>%
+  inner_join(term_choices_stemmed) %>%
+  distinct() %>% # because stemmed term choices sometimes include multiples of stems, e.g. campaign and campaigns both -> campaign
   inner_join(tt_stemmed) %>%
   distinct() %>%
   #select(doc, query, term) %>%
@@ -180,7 +205,7 @@ query_term_choice_stemmed %>%
               mutate(prob = freq / sum(freq))) %>%
   mutate(freq = replace_na(freq, 0),
          prob = replace_na(prob, 0),
-         user = factor(user, levels = c('A', 'B', 'C',
+         user = factor(user, labels = c('A', 'B', 'C',
                                         'D', 'E', 'F', 'G'))) %>% 
   ggplot(aes(user, freq)) + 
   geom_violin() +
